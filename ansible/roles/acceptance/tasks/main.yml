@@ -1,0 +1,109 @@
+- name: "Resolve Hetzner API token for acceptance checks"
+  ansible.builtin.set_fact:
+    hcloud_api_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+  when:
+    - hcloud_api_token is not defined
+    - lookup('env', 'HCLOUD_TOKEN') | default('', true) | length > 0
+
+- name: "Resolve Hetzner API token from legacy env var for acceptance checks"
+  ansible.builtin.set_fact:
+    hcloud_api_token: "{{ lookup('env', 'HETZNER_API_TOKEN') }}"
+  when:
+    - hcloud_api_token is not defined
+    - lookup('env', 'HETZNER_API_TOKEN') | default('', true) | length > 0
+
+
+- name: "Read Hetzner API token file stat for acceptance checks"
+  ansible.builtin.stat:
+    path: "{{ hetzner_api_token_file }}"
+  register: acceptance_token_file_stat
+  when:
+    - hcloud_api_token is not defined
+    - hetzner_api_token_file is defined
+    - hetzner_api_token_file | length > 0
+    - hetzner_api_token_file is not none
+
+- name: "Read Hetzner API token file contents for acceptance checks"
+  ansible.builtin.slurp:
+    path: "{{ hetzner_api_token_file }}"
+  register: acceptance_token_file
+  when:
+    - hcloud_api_token is not defined
+    - acceptance_token_file_stat is defined
+    - acceptance_token_file_stat.stat is defined
+    - acceptance_token_file_stat.stat.exists
+
+- name: "Set Hetzner API token fact for acceptance role"
+  ansible.builtin.set_fact:
+    hcloud_api_token: "{{ acceptance_token_file.content | b64decode | trim }}"
+  when:
+    - hcloud_api_token is not defined
+    - acceptance_token_file is defined
+    - acceptance_token_file.content is defined
+
+- name: "Gather service facts"
+  ansible.builtin.service_facts:
+
+- name: "Assert xrdp services active"
+  ansible.builtin.assert:
+    that:
+      - "'xrdp.service' in ansible_facts.services"
+      - ansible_facts.services['xrdp.service'].state == 'running'
+      - ansible_facts.services['xrdp.service'].status in ['enabled', 'enabled-runtime']
+      - "'xrdp-sesman.service' in ansible_facts.services"
+      - ansible_facts.services['xrdp-sesman.service'].state == 'running'
+      - ansible_facts.services['xrdp-sesman.service'].status in ['enabled', 'enabled-runtime']
+    fail_msg: "XRDP services must be running and enabled"
+
+- name: "Check RDP port listening"
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: "{{ hetzner_firewall.rdp_port | default(3389) }}"
+    state: started
+    timeout: 10
+
+- name: "Validate SSH daemon configuration"
+  ansible.builtin.command: /usr/sbin/sshd -T
+  register: sshd_config_dump
+  changed_when: false
+
+- name: "Ensure SSH hardening directives applied"
+  ansible.builtin.assert:
+    that:
+      - "'permitrootlogin no' in sshd_config_dump.stdout"
+      - "'passwordauthentication no' in sshd_config_dump.stdout"
+      - "'pubkeyauthentication yes' in sshd_config_dump.stdout"
+    fail_msg: "Expected SSH hardening directives missing from sshd -T output"
+
+- name: "Inspect firewall summary"
+  hetzner.hcloud.hcloud_firewall_info:
+    api_token: "{{ hcloud_api_token }}"
+    name: "{{ hetzner_firewall.name }}"
+  register: firewall_info
+  failed_when: false
+  changed_when: false
+  when:
+    - hcloud_api_token is defined
+    - hcloud_api_token | length > 0
+
+- name: "Report firewall attachment status"
+  ansible.builtin.debug:
+    msg: >-
+      Firewall {{ hetzner_firewall.name }} attached to: {{ firewall_info.get('firewalls', []) | map(attribute='applied_to') | list }}
+  when:
+    - firewall_info is defined
+    - firewall_info is mapping
+    - (firewall_info.get('firewalls', []) | length) > 0
+
+- name: "Firewall attachment information unavailable"
+  ansible.builtin.debug:
+    msg: "Hetzner API did not return firewall attachment data for {{ hetzner_firewall.name }}; skipping report."
+  when:
+    - firewall_info is defined
+    - firewall_info is mapping
+    - (firewall_info.get('firewalls', []) | length) == 0
+
+- name: "Firewall info lookup skipped"
+  ansible.builtin.debug:
+    msg: "Hetzner firewall info task skipped or missing credentials; set HCLOUD_TOKEN to enable attachment reporting."
+  when: firewall_info is not defined

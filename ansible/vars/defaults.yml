@@ -1,0 +1,40 @@
+---
+# Base defaults; environment-specific overrides are applied in the playbook pre_tasks.
+operator_user:
+  name: operator
+  uid: null
+  shell: /bin/bash
+  ssh_authorized_keys: []
+  sudo: true
+  state: present
+
+hetzner_api_token_file: ""
+
+hetzner_firewall:
+  name: rdp-default
+  allowed_cidrs: []  # Must be set via ANSIBLE_FIREWALL_ALLOWED_CIDRS; provisioning fails if empty
+  ssh_port: 22
+  rdp_port: 3389
+  description: Remote desktop access firewall managed by automation
+  labels:
+    managed_by: ansible
+  server_name: ""
+  state: present
+
+rdp:
+  desktop_packages:
+    - xfce4
+    - xfce4-goodies
+    - xrdp
+    - xorgxrdp
+    - pulseaudio
+    - firefox-esr  # XRDP-compatible; snap Firefox has X11 auth issues
+  service_state: started
+  service_enabled: true
+  color_depth: 16
+  disable_compositor: true
+
+system_defaults:
+  timezone: UTC
+  locale: en_US.UTF-8
+  auto_reboot: true  # Reboot automatically if kernel/systemd updates require it

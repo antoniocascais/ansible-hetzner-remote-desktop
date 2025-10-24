@@ -1,0 +1,6 @@
+.env
+.codex/
+.specify/
+specs/
+.ansible/
+.claude/
