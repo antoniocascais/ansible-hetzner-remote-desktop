@@ -55,7 +55,6 @@
   ansible.builtin.set_fact:
     hcloud_firewall_servers: "{{ [lookup('env', 'ANSIBLE_HCLOUD_SERVER_ID') | int] }}"
   when:
-    - hcloud_firewall_state == 'present'
     - lookup('env', 'ANSIBLE_HCLOUD_SERVER_ID') | default('', true) | length > 0
 
 - name: "Lookup Hetzner server by explicit name"
@@ -64,7 +63,6 @@
     name: "{{ hetzner_firewall.server_name }}"
   register: hcloud_firewall_servers_by_name
   when:
-    - hcloud_firewall_state == 'present'
     - hetzner_firewall.server_name | default('') | length > 0
     - hcloud_firewall_servers is not defined
 
@@ -73,7 +71,6 @@
     api_token: "{{ hcloud_api_token }}"
   register: hcloud_firewall_servers_fallback
   when:
-    - hcloud_firewall_state == 'present'
     - hcloud_firewall_servers is not defined
     - (hetzner_firewall.server_name | default('') | length == 0) or
       (hcloud_firewall_servers_by_name is defined and (hcloud_firewall_servers_by_name.servers | default([]) | length == 0))
@@ -86,7 +83,6 @@
     candidate_ip_servers: "{{ (hcloud_firewall_servers_fallback.servers | default([])) | selectattr('public_net.ipv4.ip', 'equalto', ansible_host) | list }}"
     target_servers: "{{ candidate_name_servers if candidate_name_servers | length > 0 else candidate_ip_servers }}"
   when:
-    - hcloud_firewall_state == 'present'
     - hcloud_firewall_servers is not defined
 
 - name: "Fail when no Hetzner servers resolved for firewall attachment"
@@ -137,6 +133,7 @@
     state: absent
   when:
     - hcloud_firewall_state == 'absent'
+    - hcloud_firewall_servers is defined
     - hcloud_firewall_servers | length > 0
 
 - name: "Ensure Hetzner firewall absent"
