@@ -1,0 +1,196 @@
+---
+- name: Provision Hetzner remote desktop host
+  hosts: hetzner_remote_desktop
+  gather_facts: true
+  become: true
+  vars_files:
+    - "{{ playbook_dir }}/../vars/defaults.yml"
+  collections:
+    - ansible.posix
+    - community.general
+    - hetzner.hcloud
+  pre_tasks:
+    - name: Apply Hetzner API token from environment
+      ansible.builtin.set_fact:
+        hcloud_api_token: "{{ token_env }}"
+      vars:
+        token_env: "{{ lookup('env', 'HCLOUD_TOKEN') | default('', true) }}"
+      when: token_env | length > 0
+
+    - name: Apply Hetzner API token from legacy environment variable
+      ansible.builtin.set_fact:
+        hcloud_api_token: "{{ legacy_token_env }}"
+      vars:
+        legacy_token_env: "{{ lookup('env', 'HETZNER_API_TOKEN') | default('', true) }}"
+      when:
+        - hcloud_api_token is not defined
+        - legacy_token_env | length > 0
+
+    - name: Apply Hetzner API token file override from environment
+      ansible.builtin.set_fact:
+        hetzner_api_token_file: "{{ token_file_env }}"
+      vars:
+        token_file_env: "{{ lookup('env', 'HCLOUD_TOKEN_FILE') | default('', true) }}"
+      when: token_file_env | length > 0
+
+    - name: Fail if Hetzner API token file missing
+      ansible.builtin.stat:
+        path: "{{ hetzner_api_token_file | default('') }}"
+      register: hetzner_api_token_stat
+      when: hetzner_api_token_file is defined and hetzner_api_token_file|length > 0
+
+    - name: Abort when Hetzner API token file absent
+      ansible.builtin.fail:
+        msg: "Set hetzner_api_token_file or HCLOUD_TOKEN env var before provisioning"
+      when:
+        - hetzner_api_token_file is defined
+        - hetzner_api_token_file|length > 0
+        - not hetzner_api_token_stat.stat.exists
+
+    - name: Apply operator username override from environment
+      ansible.builtin.set_fact:
+        operator_user: "{{ operator_user | combine({'name': operator_username_env}, recursive=True) }}"
+      vars:
+        operator_username_env: "{{ lookup('env', 'ANSIBLE_OPERATOR_USERNAME') | default('', true) }}"
+      when: operator_username_env | length > 0
+
+    - name: Apply operator UID override from environment
+      ansible.builtin.set_fact:
+        operator_user: "{{ operator_user | combine({'uid': operator_uid_env | int}, recursive=True) }}"
+      vars:
+        operator_uid_env: "{{ lookup('env', 'ANSIBLE_OPERATOR_UID') | default('', true) }}"
+      when: operator_uid_env | length > 0
+
+    - name: Apply operator shell override from environment
+      ansible.builtin.set_fact:
+        operator_user: "{{ operator_user | combine({'shell': operator_shell_env}, recursive=True) }}"
+      vars:
+        operator_shell_env: "{{ lookup('env', 'ANSIBLE_OPERATOR_SHELL') | default('', true) }}"
+      when: operator_shell_env | length > 0
+
+    - name: Apply operator sudo override from environment
+      ansible.builtin.set_fact:
+        operator_user: "{{ operator_user | combine({'sudo': operator_sudo_env | bool}, recursive=True) }}"
+      vars:
+        operator_sudo_env: "{{ lookup('env', 'ANSIBLE_OPERATOR_SUDO') | default('', true) }}"
+      when: operator_sudo_env | length > 0
+
+    - name: Apply operator SSH authorized keys override from environment
+      ansible.builtin.set_fact:
+        operator_user: "{{ operator_user | combine({'ssh_authorized_keys': operator_keys_list}, recursive=True) }}"
+      vars:
+        operator_keys_env: "{{ lookup('env', 'ANSIBLE_OPERATOR_PUBLIC_KEYS') | default('', true) }}"
+        operator_keys_list: "{{ operator_keys_env | replace('\r', '') | split('\n') | map('regex_replace', '^ +| +$', '') | reject('equalto', '') | list }}"
+      when: operator_keys_env | length > 0
+
+    - name: Apply firewall name override from environment
+      ansible.builtin.set_fact:
+        hetzner_firewall: "{{ hetzner_firewall | combine({'name': firewall_name_env}, recursive=True) }}"
+      vars:
+        firewall_name_env: "{{ lookup('env', 'ANSIBLE_FIREWALL_NAME') | default('', true) }}"
+      when: firewall_name_env | length > 0
+
+    - name: Apply firewall description override from environment
+      ansible.builtin.set_fact:
+        hetzner_firewall: "{{ hetzner_firewall | combine({'description': firewall_desc_env}, recursive=True) }}"
+      vars:
+        firewall_desc_env: "{{ lookup('env', 'ANSIBLE_FIREWALL_DESCRIPTION') | default('', true) }}"
+      when: firewall_desc_env | length > 0
+
+    - name: Apply firewall server name override from environment
+      ansible.builtin.set_fact:
+        hetzner_firewall: "{{ hetzner_firewall | combine({'server_name': firewall_server_name_env}, recursive=True) }}"
+      vars:
+        firewall_server_name_env: "{{ lookup('env', 'ANSIBLE_HCLOUD_SERVER_NAME') | default('', true) }}"
+      when: firewall_server_name_env | length > 0
+
+    - name: Apply firewall allowed CIDRs override from environment
+      ansible.builtin.set_fact:
+        hetzner_firewall: "{{ hetzner_firewall | combine({'allowed_cidrs': firewall_cidrs_list}, recursive=True) }}"
+      vars:
+        firewall_cidrs_env: "{{ lookup('env', 'ANSIBLE_FIREWALL_ALLOWED_CIDRS') | default('', true) }}"
+        firewall_cidrs_list: "{{ firewall_cidrs_env | replace('\r', '') | replace('\n', ',') | split(',') | map('regex_replace', '^ +| +$', '') | reject('equalto', '') | list }}"
+      when: firewall_cidrs_env | length > 0
+
+    - name: Validate firewall CIDR configuration
+      ansible.builtin.assert:
+        that:
+          - hetzner_firewall.allowed_cidrs | length > 0
+          - "'0.0.0.0/0' not in hetzner_firewall.allowed_cidrs"
+          - "'::/0' not in hetzner_firewall.allowed_cidrs"
+        fail_msg: |
+          Firewall CIDR configuration failed validation:
+          - Must provide at least one specific CIDR via ANSIBLE_FIREWALL_ALLOWED_CIDRS
+          - Cannot use 0.0.0.0/0 or ::/0 (blocks global internet exposure)
+          Example: ANSIBLE_FIREWALL_ALLOWED_CIDRS="203.0.113.0/24,198.51.100.10/32"
+
+    - name: Apply firewall SSH port override from environment
+      ansible.builtin.set_fact:
+        hetzner_firewall: "{{ hetzner_firewall | combine({'ssh_port': firewall_ssh_port_env | int}, recursive=True) }}"
+      vars:
+        firewall_ssh_port_env: "{{ lookup('env', 'ANSIBLE_SSH_PORT') | default('', true) }}"
+      when: firewall_ssh_port_env | length > 0
+
+    - name: Apply firewall RDP port override from environment
+      ansible.builtin.set_fact:
+        hetzner_firewall: "{{ hetzner_firewall | combine({'rdp_port': firewall_rdp_port_env | int}, recursive=True) }}"
+      vars:
+        firewall_rdp_port_env: "{{ lookup('env', 'ANSIBLE_RDP_PORT') | default('', true) }}"
+      when: firewall_rdp_port_env | length > 0
+
+    - name: Apply RDP desktop packages override from environment
+      ansible.builtin.set_fact:
+        rdp: "{{ rdp | combine({'desktop_packages': rdp_packages_list}, recursive=True) }}"
+      vars:
+        rdp_packages_env: "{{ lookup('env', 'ANSIBLE_RDP_PACKAGES') | default('', true) }}"
+        rdp_packages_list: "{{ rdp_packages_env | replace('\r', '') | replace('\n', ',') | split(',') | map('regex_replace', '^ +| +$', '') | reject('equalto', '') | list }}"
+      when: rdp_packages_env | length > 0
+
+    - name: Apply RDP color depth override from environment
+      ansible.builtin.set_fact:
+        rdp: "{{ rdp | combine({'color_depth': rdp_color_depth_env | int}, recursive=True) }}"
+      vars:
+        rdp_color_depth_env: "{{ lookup('env', 'ANSIBLE_RDP_COLOR_DEPTH') | default('', true) }}"
+      when: rdp_color_depth_env | length > 0
+
+    - name: Apply RDP compositor override from environment
+      ansible.builtin.set_fact:
+        rdp: "{{ rdp | combine({'disable_compositor': rdp_disable_compositor_env | bool}, recursive=True) }}"
+      vars:
+        rdp_disable_compositor_env: "{{ lookup('env', 'ANSIBLE_RDP_DISABLE_COMPOSITOR') | default('', true) }}"
+      when: rdp_disable_compositor_env | length > 0
+
+    - name: Apply timezone override from environment
+      ansible.builtin.set_fact:
+        system_defaults: "{{ system_defaults | combine({'timezone': timezone_env}, recursive=True) }}"
+      vars:
+        timezone_env: "{{ lookup('env', 'ANSIBLE_SYSTEM_TIMEZONE') | default('', true) }}"
+      when: timezone_env | length > 0
+
+    - name: Apply locale override from environment
+      ansible.builtin.set_fact:
+        system_defaults: "{{ system_defaults | combine({'locale': locale_env}, recursive=True) }}"
+      vars:
+        locale_env: "{{ lookup('env', 'ANSIBLE_SYSTEM_LOCALE') | default('', true) }}"
+      when: locale_env | length > 0
+
+    - name: Apply auto reboot override from environment
+      ansible.builtin.set_fact:
+        system_defaults: "{{ system_defaults | combine({'auto_reboot': auto_reboot_env | bool}, recursive=True) }}"
+      vars:
+        auto_reboot_env: "{{ lookup('env', 'ANSIBLE_SYSTEM_AUTO_REBOOT') | default('', true) }}"
+      when: auto_reboot_env | length > 0
+
+  roles:
+    - role: bootstrap
+      tags:
+        - bootstrap
+    - role: desktop
+      tags:
+        - desktop
+    - role: firewall
+      tags:
+        - firewall
+    - role: acceptance
+      tags:
+        - acceptance

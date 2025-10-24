@@ -1,0 +1,150 @@
+- name: "Check if Firefox snap is installed"
+  ansible.builtin.command:
+    cmd: snap list firefox
+  register: firefox_snap_check
+  failed_when: false
+  changed_when: false
+
+- name: "Remove Firefox snap (incompatible with XRDP)"
+  ansible.builtin.command:
+    cmd: snap remove firefox
+  register: firefox_snap_removal
+  when: firefox_snap_check.rc == 0
+  changed_when: firefox_snap_removal.rc == 0
+
+- name: "Remove Firefox transitional snap stub package"
+  ansible.builtin.apt:
+    name: firefox
+    state: absent
+    purge: true
+
+- name: "Install desktop packages"
+  ansible.builtin.apt:
+    name: "{{ rdp.desktop_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  register: desktop_pkg_result
+  retries: 5
+  delay: 10
+  until: desktop_pkg_result is succeeded
+
+- name: "Create firefox symlink to firefox-esr"
+  ansible.builtin.file:
+    src: /usr/bin/firefox-esr
+    dest: /usr/bin/firefox
+    state: link
+    force: yes
+
+- name: "Set firefox-esr as default x-www-browser alternative"
+  community.general.alternatives:
+    name: x-www-browser
+    path: /usr/bin/firefox-esr
+    link: /usr/bin/x-www-browser
+
+- name: "Ensure operator session script directory"
+  ansible.builtin.file:
+    path: "/home/{{ operator_user.name }}/.config/xfce4/xfconf/xfce-perchannel-xml"
+    state: directory
+    owner: "{{ operator_user.name }}"
+    group: "{{ operator_user.name }}"
+    mode: "0755"
+
+- name: "Configure XFCE compositor settings"
+  ansible.builtin.template:
+    src: "xfwm4.xml.j2"
+    dest: "/home/{{ operator_user.name }}/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml"
+    owner: "{{ operator_user.name }}"
+    group: "{{ operator_user.name }}"
+    mode: "0644"
+  when: rdp.disable_compositor | default(true)
+
+- name: "Ensure operator X session file"
+  ansible.builtin.copy:
+    dest: "/home/{{ operator_user.name }}/.xsession"
+    content: |
+      #!/bin/sh
+      exec startxfce4
+    owner: "{{ operator_user.name }}"
+    group: "{{ operator_user.name }}"
+    mode: "0755"
+
+- name: "Install startwm.sh for xrdp"
+  ansible.builtin.template:
+    src: "startwm.sh.j2"
+    dest: "/etc/xrdp/startwm.sh"
+    owner: root
+    group: root
+    mode: "0755"
+  notify:
+    - "Restart xrdp"
+    - "Restart xrdp-sesman"
+
+- name: "Set xrdp color depth"
+  ansible.builtin.ini_file:
+    path: "/etc/xrdp/xrdp.ini"
+    section: Globals
+    option: max_bpp
+    value: "{{ rdp.color_depth }}"
+    backup: yes
+  notify:
+    - "Restart xrdp"
+    - "Restart xrdp-sesman"
+
+- name: "Ensure xrdp service enabled"
+  ansible.builtin.systemd:
+    name: xrdp
+    enabled: "{{ rdp.service_enabled }}"
+    state: "{{ rdp.service_state }}"
+
+- name: "Ensure xrdp-sesman service enabled"
+  ansible.builtin.systemd:
+    name: xrdp-sesman
+    enabled: "{{ rdp.service_enabled }}"
+    state: "{{ rdp.service_state }}"
+
+- name: "Ensure ssl-cert group exists"
+  ansible.builtin.group:
+    name: ssl-cert
+    state: present
+
+- name: "Ensure xrdp user can read TLS certificates"
+  ansible.builtin.user:
+    name: xrdp
+    groups: ssl-cert
+    append: true
+  notify:
+    - "Restart xrdp"
+    - "Restart xrdp-sesman"
+
+- name: "Stat xrdp TLS certificate"
+  ansible.builtin.stat:
+    path: /etc/xrdp/cert.pem
+  register: xrdp_cert_stat
+
+- name: "Fix ownership on xrdp TLS certificate"
+  ansible.builtin.file:
+    path: /etc/xrdp/cert.pem
+    owner: root
+    group: ssl-cert
+    mode: "0640"
+  notify:
+    - "Restart xrdp"
+    - "Restart xrdp-sesman"
+  when: xrdp_cert_stat.stat.exists | default(false)
+
+- name: "Stat xrdp TLS private key"
+  ansible.builtin.stat:
+    path: /etc/xrdp/key.pem
+  register: xrdp_key_stat
+
+- name: "Fix ownership on xrdp TLS private key"
+  ansible.builtin.file:
+    path: /etc/xrdp/key.pem
+    owner: root
+    group: ssl-cert
+    mode: "0640"
+  notify:
+    - "Restart xrdp"
+    - "Restart xrdp-sesman"
+  when: xrdp_key_stat.stat.exists | default(false)

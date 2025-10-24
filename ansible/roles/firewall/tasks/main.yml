@@ -1,0 +1,147 @@
+- name: "Resolve Hetzner API token from environment"
+  ansible.builtin.set_fact:
+    hcloud_api_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+  when:
+    - hcloud_api_token is not defined
+    - lookup('env', 'HCLOUD_TOKEN') | default('', true) | length > 0
+
+- name: "Resolve Hetzner API token from legacy environment variable"
+  ansible.builtin.set_fact:
+    hcloud_api_token: "{{ lookup('env', 'HETZNER_API_TOKEN') }}"
+  when:
+    - hcloud_api_token is not defined
+    - lookup('env', 'HETZNER_API_TOKEN') | default('', true) | length > 0
+
+- name: "Read Hetzner API token file"
+  ansible.builtin.stat:
+    path: "{{ hetzner_api_token_file }}"
+  register: hcloud_api_token_file_stat
+  when:
+    - hcloud_api_token is not defined
+    - hetzner_api_token_file is defined
+    - hetzner_api_token_file | length > 0
+    - hetzner_api_token_file is not none
+
+- name: "Load Hetzner API token file contents"
+  ansible.builtin.slurp:
+    path: "{{ hetzner_api_token_file }}"
+  register: hcloud_api_token_file_data
+  when:
+    - hcloud_api_token is not defined
+    - hcloud_api_token_file_stat is defined
+    - hcloud_api_token_file_stat.stat is defined
+    - hcloud_api_token_file_stat.stat.exists
+
+- name: "Set Hetzner API token from file"
+  ansible.builtin.set_fact:
+    hcloud_api_token: "{{ hcloud_api_token_file_data.content | b64decode | trim }}"
+  when:
+    - hcloud_api_token is not defined
+    - hcloud_api_token_file_data is defined
+    - hcloud_api_token_file_data.content is defined
+
+- name: "Ensure Hetzner API token available"
+  ansible.builtin.assert:
+    that:
+      - hcloud_api_token is defined
+      - hcloud_api_token | length > 0
+    fail_msg: "Hetzner API token missing. Set HCLOUD_TOKEN env var or hetzner_api_token_file."
+
+- name: "Determine desired firewall state"
+  ansible.builtin.set_fact:
+    hcloud_firewall_state: "{{ hetzner_firewall.state | default('present') }}"
+
+- name: "Use explicit Hetzner server ID from environment"
+  ansible.builtin.set_fact:
+    hcloud_firewall_servers: "{{ [lookup('env', 'ANSIBLE_HCLOUD_SERVER_ID') | int] }}"
+  when:
+    - hcloud_firewall_state == 'present'
+    - lookup('env', 'ANSIBLE_HCLOUD_SERVER_ID') | default('', true) | length > 0
+
+- name: "Lookup Hetzner server by explicit name"
+  hetzner.hcloud.server_info:
+    api_token: "{{ hcloud_api_token }}"
+    name: "{{ hetzner_firewall.server_name }}"
+  register: hcloud_firewall_servers_by_name
+  when:
+    - hcloud_firewall_state == 'present'
+    - hetzner_firewall.server_name | default('') | length > 0
+    - hcloud_firewall_servers is not defined
+
+- name: "Lookup Hetzner servers for fallback matching"
+  hetzner.hcloud.server_info:
+    api_token: "{{ hcloud_api_token }}"
+  register: hcloud_firewall_servers_fallback
+  when:
+    - hcloud_firewall_state == 'present'
+    - hcloud_firewall_servers is not defined
+    - (hetzner_firewall.server_name | default('') | length == 0) or
+      (hcloud_firewall_servers_by_name is defined and (hcloud_firewall_servers_by_name.servers | default([]) | length == 0))
+
+- name: "Determine Hetzner server attachment IDs"
+  ansible.builtin.set_fact:
+    hcloud_firewall_servers: "{{ target_servers | map(attribute='id') | list }}"
+  vars:
+    candidate_name_servers: "{{ hcloud_firewall_servers_by_name.servers | default([]) }}"
+    candidate_ip_servers: "{{ (hcloud_firewall_servers_fallback.servers | default([])) | selectattr('public_net.ipv4.ip', 'equalto', ansible_host) | list }}"
+    target_servers: "{{ candidate_name_servers if candidate_name_servers | length > 0 else candidate_ip_servers }}"
+  when:
+    - hcloud_firewall_state == 'present'
+    - hcloud_firewall_servers is not defined
+
+- name: "Fail when no Hetzner servers resolved for firewall attachment"
+  ansible.builtin.assert:
+    that:
+      - hcloud_firewall_servers is defined
+      - hcloud_firewall_servers | length > 0
+    fail_msg: >-
+      Unable to resolve Hetzner server for firewall attachment. Set ANSIBLE_HCLOUD_SERVER_NAME
+      to the exact Cloud server name or ensure the host IP ({{ ansible_host }}) matches an existing server.
+  when: hcloud_firewall_state == 'present'
+
+- name: "Ensure Hetzner firewall exists"
+  hetzner.hcloud.firewall:
+    api_token: "{{ hcloud_api_token }}"
+    state: present
+    name: "{{ hetzner_firewall.name }}"
+    labels: "{{ hetzner_firewall.labels | default({}) }}"
+    rules:
+      - direction: in
+        protocol: tcp
+        port: "{{ hetzner_firewall.ssh_port | string }}"
+        source_ips: "{{ hetzner_firewall.allowed_cidrs }}"
+        description: "SSH access"
+      - direction: in
+        protocol: tcp
+        port: "{{ hetzner_firewall.rdp_port | string }}"
+        source_ips: "{{ hetzner_firewall.allowed_cidrs }}"
+        description: "RDP access"
+  register: firewall_result
+  when: hcloud_firewall_state == 'present'
+
+- name: "Apply firewall to target servers"
+  hetzner.hcloud.firewall_resource:
+    api_token: "{{ hcloud_api_token }}"
+    firewall: "{{ hetzner_firewall.name }}"
+    servers: "{{ hcloud_firewall_servers }}"
+    state: present
+  when:
+    - hcloud_firewall_state == 'present'
+    - hcloud_firewall_servers | length > 0
+
+- name: "Detach firewall from servers"
+  hetzner.hcloud.firewall_resource:
+    api_token: "{{ hcloud_api_token }}"
+    firewall: "{{ hetzner_firewall.name }}"
+    servers: "{{ hcloud_firewall_servers }}"
+    state: absent
+  when:
+    - hcloud_firewall_state == 'absent'
+    - hcloud_firewall_servers | length > 0
+
+- name: "Ensure Hetzner firewall absent"
+  hetzner.hcloud.firewall:
+    api_token: "{{ hcloud_api_token }}"
+    state: absent
+    name: "{{ hetzner_firewall.name }}"
+  when: hcloud_firewall_state == 'absent'

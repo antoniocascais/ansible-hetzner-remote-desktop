@@ -1,0 +1,8 @@
+---
+collections:
+  - name: ansible.posix
+    version: 1.6.2
+  - name: community.general
+    version: 10.5.0
+  - name: hetzner.hcloud
+    version: 4.3.0

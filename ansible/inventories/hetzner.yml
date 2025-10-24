@@ -1,0 +1,11 @@
+# Sample static inventory (not used by scripts). Provided for reference/testing only.
+all:
+  children:
+    hetzner_remote_desktop:
+      hosts:
+        example_host:
+          ansible_host: 203.0.113.10
+          ansible_user: root
+          ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+          ansible_port: 22
+          ansible_python_interpreter: /usr/bin/python3
