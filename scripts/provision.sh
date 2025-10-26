@@ -33,7 +33,7 @@ load_dotenv() {
         value="${value:1:-1}"
       fi
 
-      export "${key}=${value}"
+      [[ -z "${!key:-}" ]] && export "${key}=${value}"
     else
       echo "Warning: ignoring invalid line in ${dotenv_file}: ${line}" >&2
     fi
@@ -49,12 +49,12 @@ if [[ -n "${ANSIBLE_BECOME_PASSWORD:-}" ]]; then
   export ANSIBLE_BECOME_PASSWORD
 fi
 
-if [[ -n "${ANSIBLE_OPERATOR_PUBLIC_KEYS_FILE:-}" && -z "${ANSIBLE_OPERATOR_PUBLIC_KEYS:-}" ]]; then
-  if [[ -f "${ANSIBLE_OPERATOR_PUBLIC_KEYS_FILE}" ]]; then
-    operator_keys="$(<"${ANSIBLE_OPERATOR_PUBLIC_KEYS_FILE}")"
-    export ANSIBLE_OPERATOR_PUBLIC_KEYS="${operator_keys}"
+if [[ -n "${ANSIBLE_SSH_PUBLIC_KEYS_FILE:-}" && -z "${ANSIBLE_SSH_PUBLIC_KEYS:-}" ]]; then
+  if [[ -f "${ANSIBLE_SSH_PUBLIC_KEYS_FILE}" ]]; then
+    ssh_keys="$(<"${ANSIBLE_SSH_PUBLIC_KEYS_FILE}")"
+    export ANSIBLE_SSH_PUBLIC_KEYS="${ssh_keys}"
   else
-    echo "Warning: ANSIBLE_OPERATOR_PUBLIC_KEYS_FILE=${ANSIBLE_OPERATOR_PUBLIC_KEYS_FILE} not found" >&2
+    echo "Warning: ANSIBLE_SSH_PUBLIC_KEYS_FILE=${ANSIBLE_SSH_PUBLIC_KEYS_FILE} not found" >&2
   fi
 fi
 
@@ -66,8 +66,16 @@ if [[ -z "${HCLOUD_TOKEN_FILE:-}" && -n "${HETZNER_API_TOKEN_FILE:-}" ]]; then
   export HCLOUD_TOKEN_FILE="${HETZNER_API_TOKEN_FILE}"
 fi
 
-if [[ -z "${ANSIBLE_REMOTE_SSH_PORT:-}" && -n "${ANSIBLE_SSH_PORT:-}" ]]; then
-  export ANSIBLE_REMOTE_SSH_PORT="${ANSIBLE_SSH_PORT}"
+# Check for passlib dependency (required for password hashing)
+if ! python3 -c "import passlib" 2>/dev/null; then
+  echo "Error: passlib Python library is required for password hashing but not found." >&2
+  echo "" >&2
+  echo "Install it using one of the following methods:" >&2
+  echo "  - pip/pip3:       pip install passlib" >&2
+  echo "  - Manjaro/Arch:   sudo pacman -S python-passlib" >&2
+  echo "  - Debian/Ubuntu:  sudo apt install python3-passlib" >&2
+  echo "" >&2
+  exit 1
 fi
 
 REMOTE_HOST="${ANSIBLE_REMOTE_HOST:-}"
@@ -76,10 +84,17 @@ if [[ -z "${REMOTE_HOST}" ]]; then
   exit 1
 fi
 
-REMOTE_HOSTNAME="${ANSIBLE_REMOTE_HOSTNAME:-hetzner_host}"
+TARGET_USER="${ANSIBLE_TARGET_USER:-}"
+if [[ -z "${TARGET_USER}" ]]; then
+  echo "ANSIBLE_TARGET_USER is required. Set it in .env before provisioning." >&2
+  echo "This is the user that will be created/managed on the remote server." >&2
+  exit 1
+fi
+
+REMOTE_HOSTNAME="${ANSIBLE_HCLOUD_SERVER_NAME:-hetzner_host}"
 REMOTE_USER="${ANSIBLE_REMOTE_USER:-root}"
 REMOTE_KEY="${ANSIBLE_REMOTE_SSH_KEY:-~/.ssh/id_ed25519}"
-REMOTE_PORT="${ANSIBLE_REMOTE_SSH_PORT:-22}"
+REMOTE_PORT="${ANSIBLE_SSH_PORT:-22}"
 REMOTE_PYTHON="${ANSIBLE_REMOTE_PYTHON:-/usr/bin/python3}"
 
 

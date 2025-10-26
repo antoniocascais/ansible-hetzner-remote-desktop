@@ -32,6 +32,6 @@ ClientAliveCountMax 2
 LoginGraceTime 30
 MaxAuthTries 3
 
-AllowUsers {{ operator_user.name }}
+AllowUsers {{ remote_user.name }}
 
 Subsystem sftp /usr/lib/openssh/sftp-server
