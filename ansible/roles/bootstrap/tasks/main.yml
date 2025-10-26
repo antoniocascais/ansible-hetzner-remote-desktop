@@ -1,15 +1,15 @@
-- name: "Validate operator user configuration"
+- name: "Validate remote user configuration"
   ansible.builtin.assert:
     that:
-      - operator_user.name is defined
-      - operator_user.name | length > 0
-    fail_msg: "operator_user.name must be defined and non-empty"
+      - remote_user.name is defined
+      - remote_user.name | length > 0
+    fail_msg: "remote_user.name must be defined and non-empty"
 
-- name: "Warn when no SSH keys provided for operator user"
+- name: "Warn when no SSH keys provided for remote user"
   ansible.builtin.debug:
-    msg: "No SSH public keys provided for operator user; supply operator_user.ssh_authorized_keys to enable logins."
+    msg: "No SSH public keys provided for remote user; supply remote_user.ssh_authorized_keys to enable logins."
     warn: true
-  when: (operator_user.ssh_authorized_keys | default([])) | length == 0
+  when: (remote_user.ssh_authorized_keys | default([])) | length == 0
 
 - name: "Ensure timezone configured"
   community.general.timezone:
@@ -45,47 +45,48 @@
     - system_defaults.auto_reboot | default(true)
     - reboot_required_file.stat.exists
 
-- name: "Ensure operator primary group exists"
+- name: "Ensure remote user primary group exists"
   ansible.builtin.group:
-    name: "{{ operator_user.name }}"
+    name: "{{ remote_user.name }}"
     state: present
 
-- name: "Ensure operator user exists"
+- name: "Ensure remote user exists"
   ansible.builtin.user:
-    name: "{{ operator_user.name }}"
-    state: "{{ operator_user.state | default('present') }}"
-    shell: "{{ operator_user.shell | default('/bin/bash') }}"
-    uid: "{{ operator_user.uid if (operator_user.uid is defined and operator_user.uid not in [None, '']) else omit }}"
-    group: "{{ operator_user.name }}"
-    groups: "{{ (operator_user.sudo | default(true)) | ternary('sudo', omit) }}"
+    name: "{{ remote_user.name }}"
+    password: "{{ remote_user.password if (remote_user.password is defined and remote_user.password | length > 0) else omit }}"
+    state: "{{ remote_user.state | default('present') }}"
+    shell: "{{ remote_user.shell | default('/bin/bash') }}"
+    uid: "{{ remote_user.uid if (remote_user.uid is defined and remote_user.uid not in [None, '']) else omit }}"
+    group: "{{ remote_user.name }}"
+    groups: "{{ (remote_user.sudo | default(true)) | ternary('sudo', omit) }}"
     append: true
     create_home: true
 
-- name: "Ensure operator SSH directory"
+- name: "Ensure remote user SSH directory"
   ansible.builtin.file:
-    path: "/home/{{ operator_user.name }}/.ssh"
+    path: "/home/{{ remote_user.name }}/.ssh"
     state: directory
-    owner: "{{ operator_user.name }}"
-    group: "{{ operator_user.name }}"
+    owner: "{{ remote_user.name }}"
+    group: "{{ remote_user.name }}"
     mode: "0700"
 
-- name: "Install operator authorized keys"
+- name: "Install remote user authorized keys"
   ansible.posix.authorized_key:
-    user: "{{ operator_user.name }}"
+    user: "{{ remote_user.name }}"
     key: "{{ item }}"
     state: present
     manage_dir: false
-  loop: "{{ operator_user.ssh_authorized_keys | default([]) }}"
-  when: (operator_user.ssh_authorized_keys | default([])) | length > 0
+  loop: "{{ remote_user.ssh_authorized_keys | default([]) }}"
+  when: (remote_user.ssh_authorized_keys | default([])) | length > 0
 
-- name: "Configure sudo access for operator"
+- name: "Configure sudo access for remote user"
   ansible.builtin.copy:
-    dest: "/etc/sudoers.d/90-{{ operator_user.name }}"
+    dest: "/etc/sudoers.d/90-{{ remote_user.name }}"
     owner: root
     group: root
     mode: "0440"
-    content: "{{ operator_user.name }} ALL=(ALL) ALL\n"
-  when: operator_user.sudo | default(true)
+    content: "{{ remote_user.name }} ALL=(ALL) ALL\n"
+  when: remote_user.sudo | default(true)
 
 - name: "Install hardened sshd_config"
   ansible.builtin.template:

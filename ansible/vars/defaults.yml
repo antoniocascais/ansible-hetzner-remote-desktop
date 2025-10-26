@@ -1,7 +1,8 @@
 ---
 # Base defaults; environment-specific overrides are applied in the playbook pre_tasks.
-operator_user:
+remote_user:
   name: operator
+  password: ""  # Set via ANSIBLE_BECOME_PASSWORD (hashed with sha512)
   uid: null
   shell: /bin/bash
   ssh_authorized_keys: []

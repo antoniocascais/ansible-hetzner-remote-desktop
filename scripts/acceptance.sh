@@ -33,7 +33,7 @@ load_dotenv() {
         value="${value:1:-1}"
       fi
 
-      export "${key}=${value}"
+      [[ -z "${!key:-}" ]] && export "${key}=${value}"
     else
       echo "Warning: ignoring invalid line in ${dotenv_file}: ${line}" >&2
     fi
@@ -44,12 +44,12 @@ if [[ -f "${ENV_FILE}" ]]; then
   load_dotenv "${ENV_FILE}"
 fi
 
-if [[ -n "${ANSIBLE_OPERATOR_PUBLIC_KEYS_FILE:-}" && -z "${ANSIBLE_OPERATOR_PUBLIC_KEYS:-}" ]]; then
-  if [[ -f "${ANSIBLE_OPERATOR_PUBLIC_KEYS_FILE}" ]]; then
-    operator_keys="$(<"${ANSIBLE_OPERATOR_PUBLIC_KEYS_FILE}")"
-    export ANSIBLE_OPERATOR_PUBLIC_KEYS="${operator_keys}"
+if [[ -n "${ANSIBLE_SSH_PUBLIC_KEYS_FILE:-}" && -z "${ANSIBLE_SSH_PUBLIC_KEYS:-}" ]]; then
+  if [[ -f "${ANSIBLE_SSH_PUBLIC_KEYS_FILE}" ]]; then
+    ssh_keys="$(<"${ANSIBLE_SSH_PUBLIC_KEYS_FILE}")"
+    export ANSIBLE_SSH_PUBLIC_KEYS="${ssh_keys}"
   else
-    echo "Warning: ANSIBLE_OPERATOR_PUBLIC_KEYS_FILE=${ANSIBLE_OPERATOR_PUBLIC_KEYS_FILE} not found" >&2
+    echo "Warning: ANSIBLE_SSH_PUBLIC_KEYS_FILE=${ANSIBLE_SSH_PUBLIC_KEYS_FILE} not found" >&2
   fi
 fi
 
@@ -61,20 +61,16 @@ if [[ -z "${HCLOUD_TOKEN_FILE:-}" && -n "${HETZNER_API_TOKEN_FILE:-}" ]]; then
   export HCLOUD_TOKEN_FILE="${HETZNER_API_TOKEN_FILE}"
 fi
 
-if [[ -z "${ANSIBLE_REMOTE_SSH_PORT:-}" && -n "${ANSIBLE_SSH_PORT:-}" ]]; then
-  export ANSIBLE_REMOTE_SSH_PORT="${ANSIBLE_SSH_PORT}"
-fi
-
 REMOTE_HOST="${ANSIBLE_REMOTE_HOST:-}"
 if [[ -z "${REMOTE_HOST}" ]]; then
   echo "ANSIBLE_REMOTE_HOST is required. Set it in .env before running acceptance checks." >&2
   exit 1
 fi
 
-REMOTE_HOSTNAME="${ANSIBLE_REMOTE_HOSTNAME:-hetzner_host}"
+REMOTE_HOSTNAME="${ANSIBLE_HCLOUD_SERVER_NAME:-hetzner_host}"
 REMOTE_USER="${ANSIBLE_REMOTE_USER:-root}"
 REMOTE_KEY="${ANSIBLE_REMOTE_SSH_KEY:-~/.ssh/id_ed25519}"
-REMOTE_PORT="${ANSIBLE_REMOTE_SSH_PORT:-22}"
+REMOTE_PORT="${ANSIBLE_SSH_PORT:-22}"
 REMOTE_PYTHON="${ANSIBLE_REMOTE_PYTHON:-/usr/bin/python3}"
 
 

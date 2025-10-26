@@ -47,41 +47,27 @@
         - hetzner_api_token_file|length > 0
         - not hetzner_api_token_stat.stat.exists
 
-    - name: Apply operator username override from environment
+    - name: Apply target user name from environment
       ansible.builtin.set_fact:
-        operator_user: "{{ operator_user | combine({'name': operator_username_env}, recursive=True) }}"
+        remote_user: "{{ remote_user | combine({'name': target_username_env}, recursive=True) }}"
       vars:
-        operator_username_env: "{{ lookup('env', 'ANSIBLE_OPERATOR_USERNAME') | default('', true) }}"
-      when: operator_username_env | length > 0
+        target_username_env: "{{ lookup('env', 'ANSIBLE_TARGET_USER') | default('', true) }}"
+      when: target_username_env | length > 0
 
-    - name: Apply operator UID override from environment
+    - name: Apply remote user password from environment
       ansible.builtin.set_fact:
-        operator_user: "{{ operator_user | combine({'uid': operator_uid_env | int}, recursive=True) }}"
+        remote_user: "{{ remote_user | combine({'password': remote_password_env | password_hash('sha512')}, recursive=True) }}"
       vars:
-        operator_uid_env: "{{ lookup('env', 'ANSIBLE_OPERATOR_UID') | default('', true) }}"
-      when: operator_uid_env | length > 0
+        remote_password_env: "{{ lookup('env', 'ANSIBLE_BECOME_PASSWORD') | default('', true) }}"
+      when: remote_password_env | length > 0
 
-    - name: Apply operator shell override from environment
+    - name: Apply remote user SSH authorized keys from environment
       ansible.builtin.set_fact:
-        operator_user: "{{ operator_user | combine({'shell': operator_shell_env}, recursive=True) }}"
+        remote_user: "{{ remote_user | combine({'ssh_authorized_keys': remote_keys_list}, recursive=True) }}"
       vars:
-        operator_shell_env: "{{ lookup('env', 'ANSIBLE_OPERATOR_SHELL') | default('', true) }}"
-      when: operator_shell_env | length > 0
-
-    - name: Apply operator sudo override from environment
-      ansible.builtin.set_fact:
-        operator_user: "{{ operator_user | combine({'sudo': operator_sudo_env | bool}, recursive=True) }}"
-      vars:
-        operator_sudo_env: "{{ lookup('env', 'ANSIBLE_OPERATOR_SUDO') | default('', true) }}"
-      when: operator_sudo_env | length > 0
-
-    - name: Apply operator SSH authorized keys override from environment
-      ansible.builtin.set_fact:
-        operator_user: "{{ operator_user | combine({'ssh_authorized_keys': operator_keys_list}, recursive=True) }}"
-      vars:
-        operator_keys_env: "{{ lookup('env', 'ANSIBLE_OPERATOR_PUBLIC_KEYS') | default('', true) }}"
-        operator_keys_list: "{{ operator_keys_env | replace('\r', '') | split('\n') | map('regex_replace', '^ +| +$', '') | reject('equalto', '') | list }}"
-      when: operator_keys_env | length > 0
+        remote_keys_env: "{{ lookup('env', 'ANSIBLE_SSH_PUBLIC_KEYS') | default('', true) }}"
+        remote_keys_list: "{{ remote_keys_env | replace('\r', '') | split('\n') | map('regex_replace', '^ +| +$', '') | reject('equalto', '') | list }}"
+      when: remote_keys_env | length > 0
 
     - name: Apply firewall name override from environment
       ansible.builtin.set_fact:

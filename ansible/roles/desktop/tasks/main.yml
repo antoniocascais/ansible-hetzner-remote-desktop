@@ -18,6 +18,12 @@
     state: absent
     purge: true
 
+- name: "Add Mozilla Team PPA for Firefox ESR"
+  ansible.builtin.apt_repository:
+    repo: ppa:mozillateam/ppa
+    state: present
+    update_cache: yes
+
 - name: "Install desktop packages"
   ansible.builtin.apt:
     name: "{{ rdp.desktop_packages }}"
@@ -42,31 +48,31 @@
     path: /usr/bin/firefox-esr
     link: /usr/bin/x-www-browser
 
-- name: "Ensure operator session script directory"
+- name: "Ensure remote user session script directory"
   ansible.builtin.file:
-    path: "/home/{{ operator_user.name }}/.config/xfce4/xfconf/xfce-perchannel-xml"
+    path: "/home/{{ remote_user.name }}/.config/xfce4/xfconf/xfce-perchannel-xml"
     state: directory
-    owner: "{{ operator_user.name }}"
-    group: "{{ operator_user.name }}"
+    owner: "{{ remote_user.name }}"
+    group: "{{ remote_user.name }}"
     mode: "0755"
 
 - name: "Configure XFCE compositor settings"
   ansible.builtin.template:
     src: "xfwm4.xml.j2"
-    dest: "/home/{{ operator_user.name }}/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml"
-    owner: "{{ operator_user.name }}"
-    group: "{{ operator_user.name }}"
+    dest: "/home/{{ remote_user.name }}/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml"
+    owner: "{{ remote_user.name }}"
+    group: "{{ remote_user.name }}"
     mode: "0644"
   when: rdp.disable_compositor | default(true)
 
-- name: "Ensure operator X session file"
+- name: "Ensure remote user X session file"
   ansible.builtin.copy:
-    dest: "/home/{{ operator_user.name }}/.xsession"
+    dest: "/home/{{ remote_user.name }}/.xsession"
     content: |
       #!/bin/sh
       exec startxfce4
-    owner: "{{ operator_user.name }}"
-    group: "{{ operator_user.name }}"
+    owner: "{{ remote_user.name }}"
+    group: "{{ remote_user.name }}"
     mode: "0755"
 
 - name: "Install startwm.sh for xrdp"
