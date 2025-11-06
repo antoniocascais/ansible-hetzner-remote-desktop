@@ -28,6 +28,7 @@ rdp:
     - xfce4-goodies
     - xrdp
     - xorgxrdp
+    - dbus-x11  # Provides dbus-launch for XFCE session management
     - pulseaudio
     - firefox-esr  # XRDP-compatible; snap Firefox has X11 auth issues
   service_state: started
